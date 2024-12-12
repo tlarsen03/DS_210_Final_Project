@@ -13,7 +13,6 @@ impl Graph {
         }
     }
 
-    // Add an edge to the graph
     fn add_edge(&mut self, origin: &str, destination: &str, flights: u32) {
         self.adjacency_list
             .entry(origin.to_string())
@@ -26,52 +25,53 @@ impl Graph {
             .insert((origin.to_string(), flights));
     }
 
-    // Calculate closeness centrality
+    fn shortest_paths(&self, start: &str) -> HashMap<String, u64> {
+        let mut distances: HashMap<String, u64> = self
+            .adjacency_list
+            .keys()
+            .map(|node| (node.clone(), u64::MAX))
+            .collect();
+        let mut queue = VecDeque::new();
+    
+        if let Some(start_distance) = distances.get_mut(start) {
+            *start_distance = 0;
+        }
+        queue.push_back(start.to_string());
+    
+        while let Some(current) = queue.pop_front() {
+            let current_distance = distances[&current];
+            if let Some(neighbors) = self.adjacency_list.get(&current) {
+                for (neighbor, weight) in neighbors {
+                    let new_distance = current_distance.saturating_add(*weight as u64);
+                    if new_distance < distances[neighbor] {
+                        distances.insert(neighbor.clone(), new_distance);
+                        queue.push_back(neighbor.clone());
+                    }
+                }
+            }
+        }
+    
+        distances
+    }
     fn closeness_centrality(&self) -> HashMap<String, f64> {
         let mut centrality = HashMap::new();
-
+    
         for node in self.adjacency_list.keys() {
             let shortest_paths = self.shortest_paths(node);
-            let total_distance: u32 = shortest_paths.values().sum();
-
+            let total_distance: u64 = shortest_paths
+                .values()
+                .filter(|&&d| d < u64::MAX) // Exclude unreachable nodes
+                .sum();
+    
             if total_distance > 0 {
                 centrality.insert(node.clone(), 1.0 / total_distance as f64);
             } else {
                 centrality.insert(node.clone(), 0.0);
             }
         }
-
+    
         centrality
-    }
-
-    // Helper to calculate shortest paths from a source node using BFS
-    fn shortest_paths(&self, start: &str) -> HashMap<String, u32> {
-        let mut distances: HashMap<String, u32> = self
-            .adjacency_list
-            .keys()
-            .map(|node| (node.clone(), u32::MAX))
-            .collect();
-        let mut queue = VecDeque::new();
-
-        if let Some(start_distance) = distances.get_mut(start) {
-            *start_distance = 0;
-        }
-        queue.push_back(start.to_string());
-
-        while let Some(current) = queue.pop_front() {
-            let current_distance = distances[&current];
-            if let Some(neighbors) = self.adjacency_list.get(&current) {
-                for (neighbor, _) in neighbors {
-                    if distances[neighbor] == u32::MAX {
-                        distances.insert(neighbor.clone(), current_distance + 1);
-                        queue.push_back(neighbor.clone());
-                    }
-                }
-            }
-        }
-
-        distances
-    }
+    }      
 
     // Calculate betweenness centrality
     fn betweenness_centrality(&self) -> HashMap<String, f64> {
@@ -95,7 +95,6 @@ impl Graph {
         centrality
     }
 
-    // Helper to calculate all shortest paths and counts using BFS
     fn all_pairs_shortest_paths(
         &self,
         start: &str,
@@ -109,7 +108,6 @@ impl Graph {
         let mut queue = VecDeque::new();
         let mut path_counts: HashMap<String, u32> = HashMap::new();
 
-        // Initialize distances and path counts
         for node in self.adjacency_list.keys() {
             path_counts.insert(node.clone(), 0);
         }
@@ -145,7 +143,6 @@ impl Graph {
     }
 }
 
-// Helper to calculate path counts for betweenness centrality
 fn build_path_counts(
     predecessors: &HashMap<String, Vec<String>>,
     start: &str,
@@ -174,7 +171,7 @@ fn build_path_counts(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let file_path = "International_Report_Departures.csv"; // Adjust as needed
+    let file_path = "International_Report_Departures.csv"; 
     let mut graph = Graph::new();
 
     // Read the CSV file using the csv crate
