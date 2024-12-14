@@ -1,173 +1,221 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::error::Error;
 use csv::Reader;
 
-// Graph Representation
-type Vertex = usize;
-type Distance = usize;
-type Edge = (Vertex, Vertex, Distance);
-
-#[derive(Debug, Copy, Clone)]
-struct Outedge {
-    vertex: Vertex,
-    length: Distance,
-}
-
-type AdjacencyList = Vec<Outedge>;
-
 #[derive(Debug)]
-struct Graph {
-    n: usize,
-    outedges: Vec<AdjacencyList>,
+struct FlightData {
+    year: u32,
+    month: u32,
+    us_airport: String,
+    foreign_airport: String,
+    carrier: String,
+    flight_type: String,
+    total_flights: u32,
 }
 
-impl Graph {
-    fn create_directed(n: usize, edges: &[Edge]) -> Graph {
-        let mut outedges = vec![vec![]; n];
-        for (u, v, length) in edges {
-            outedges[*u].push(Outedge {
-                vertex: *v,
-                length: *length,
-            });
-        }
-        Graph { n, outedges }
-    }
-
-    fn degree_centrality(&self) -> HashMap<Vertex, usize> {
-        self.outedges
-            .iter()
-            .enumerate()
-            .map(|(u, edges)| (u, edges.len()))
-            .collect()
-    }
-
-    fn closeness_centrality(&self) -> HashMap<Vertex, f64> {
-        let mut centrality = HashMap::new();
-    
-        for node in 0..self.n {
-            let shortest_paths = self.shortest_paths(node);
-    
-            let reachable_paths: Vec<_> = shortest_paths
-                .values()
-                .filter(|&&d| d < u64::MAX) // Ignore unreachable nodes
-                .cloned()
-                .collect();
-    
-            let total_distance: u64 = reachable_paths.iter().sum();
-            let reachable_count = reachable_paths.len();
-    
-            if total_distance > 0 && reachable_count > 1 {
-                let normalization_factor = (reachable_count - 1) as f64; // Exclude the starting node
-                let closeness = normalization_factor / total_distance as f64;
-                centrality.insert(node, closeness);
-            } else {
-                centrality.insert(node, 0.0); // Isolated or unreachable nodes
-            }
-        }
-    
-        centrality
-    }
-    
-    fn shortest_paths(&self, start: Vertex) -> HashMap<Vertex, u64> {
-        let mut distances: HashMap<Vertex, u64> = (0..self.n).map(|v| (v, u64::MAX)).collect();
-        let mut queue = VecDeque::new();
-    
-        distances.insert(start, 0);
-        queue.push_back(start);
-    
-        while let Some(current) = queue.pop_front() {
-            let current_distance = distances[&current];
-    
-            for edge in &self.outedges[current] {
-                if distances[&edge.vertex] == u64::MAX {
-                    distances.insert(edge.vertex, current_distance + edge.length as u64);
-                    queue.push_back(edge.vertex);
-                }
-            }
-        }
-    
-        distances
-    }    
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let file_path = "International_Report_Departures.csv";
+fn read_csv(file_path: &str) -> Result<Vec<FlightData>, Box<dyn Error>> {
     let mut rdr = Reader::from_path(file_path)?;
-
-    // Map airports to vertices
-    let mut airport_map: HashMap<String, Vertex> = HashMap::new();
-    let mut reverse_airport_map: HashMap<Vertex, String> = HashMap::new(); // For reverse lookup
-    let mut edges: Vec<Edge> = vec![];
-    let mut vertex_count = 0;
-
-    // Print the first five rows of the CSV
-    println!("=== First 5 Rows of the CSV ===");
-    for (i, result) in rdr.records().enumerate() {
-        let record = result?;
-        println!("{:?}", record);
-
-        // Break after printing the first 5 rows
-        if i == 4 {
-            break;
-        }
-    }
-
-    // Reinitialize the reader to parse the data again (CSV reader does not allow rewinding)
-    let mut rdr = Reader::from_path(file_path)?;
+    let mut flights = Vec::new();
 
     for result in rdr.records() {
         let record = result?;
-
-        // Extract fields using the correct column names
-        let origin = record.get(4).unwrap().to_string(); // 'usg_apt'
-        let destination = record.get(7).unwrap().to_string(); // 'fg_apt'
-        let flights: usize = record.get(15).unwrap().parse().unwrap(); // 'Total'
-
-        // Map airports to vertex indices
-        let origin_index = *airport_map.entry(origin.clone()).or_insert_with(|| {
-            let idx = vertex_count;
-            reverse_airport_map.insert(idx, origin.clone());
-            vertex_count += 1;
-            idx
+        flights.push(FlightData {
+            year: record[1].parse()?,
+            month: record[2].parse()?,
+            us_airport: record[4].to_string(),
+            foreign_airport: record[7].to_string(),
+            carrier: record[10].to_string(),
+            flight_type: record[12].to_string(),
+            total_flights: record[15].parse()?,
         });
-
-        let destination_index = *airport_map.entry(destination.clone()).or_insert_with(|| {
-            let idx = vertex_count;
-            reverse_airport_map.insert(idx, destination.clone());
-            vertex_count += 1;
-            idx
-        });
-
-        // Add edge with the correct flight count
-        edges.push((origin_index, destination_index, flights));
     }
 
-    // Create the directed graph
-    let graph = Graph::create_directed(vertex_count, &edges);
+    Ok(flights)
+}
 
-    // Compute centralities
-    let degree_centrality = graph.degree_centrality();
-    let closeness_centrality = graph.closeness_centrality();
+#[derive(Debug)]
+struct Graph {
+    adjacency_list: HashMap<String, Vec<(String, u32)>>, // Node -> [(Neighbor, Weight)]
+}
 
-    // Display results
-    println!("\n=== Centrality Metrics for Airports ===\n");
-
-    // Top 10 busiest airports by degree centrality
-    let mut degree_sorted: Vec<_> = degree_centrality.iter().collect();
-    degree_sorted.sort_by(|a, b| b.1.cmp(a.1));
-    println!("Top 10 Busiest Airports (by Degree):");
-    for (i, (vertex, degree)) in degree_sorted.iter().take(10).enumerate() {
-        let airport = reverse_airport_map.get(vertex).unwrap();
-        println!("{}. {} - {} connections", i + 1, airport, degree);
+impl Graph {
+    fn new() -> Self {
+        Self {
+            adjacency_list: HashMap::new(),
+        }
     }
 
-    // Top 10 airports by closeness centrality
-    let mut closeness_sorted: Vec<_> = closeness_centrality.iter().collect();
-    closeness_sorted.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
-    println!("\nTop 10 Airports by Closeness Centrality:");
-    for (i, (vertex, closeness)) in closeness_sorted.iter().take(10).enumerate() {
-        let airport = reverse_airport_map.get(vertex).unwrap();
-        println!("{}. {} - Closeness Centrality: {:.5}", i + 1, airport, closeness);
+    fn add_edge(&mut self, from: &str, to: &str, weight: u32) {
+        self.adjacency_list
+            .entry(from.to_string())
+            .or_insert_with(Vec::new)
+            .push((to.to_string(), weight));
+
+        self.adjacency_list
+            .entry(to.to_string())
+            .or_insert_with(Vec::new)
+            .push((from.to_string(), weight));
     }
+
+    fn bfs_shortest_paths(&self, start: &str) -> HashMap<String, u32> {
+        let mut distances: HashMap<String, u32> = HashMap::new();
+        let mut queue: VecDeque<(String, u32)> = VecDeque::new();
+        let mut visited: HashSet<String> = HashSet::new();
+
+        queue.push_back((start.to_string(), 0));
+
+        while let Some((current, distance)) = queue.pop_front() {
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+
+            distances.insert(current.clone(), distance);
+
+            if let Some(neighbors) = self.adjacency_list.get(&current) {
+                for (neighbor, _) in neighbors {
+                    if !visited.contains(neighbor) {
+                        queue.push_back((neighbor.clone(), distance + 1));
+                    }
+                }
+            }
+        }
+
+        distances
+    }
+
+    fn connected_components(&self) -> Vec<HashSet<String>> {
+        let mut visited = HashSet::new();
+        let mut components = Vec::new();
+
+        for node in self.adjacency_list.keys() {
+            if !visited.contains(node) {
+                let mut component = HashSet::new();
+                let mut stack = vec![node.clone()];
+                while let Some(current) = stack.pop() {
+                    if visited.insert(current.clone()) {
+                        component.insert(current.clone());
+                        if let Some(neighbors) = self.adjacency_list.get(&current) {
+                            for (neighbor, _) in neighbors {
+                                if !visited.contains(neighbor) {
+                                    stack.push(neighbor.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                components.push(component);
+            }
+        }
+
+        components
+    }
+
+    fn largest_component(&self) -> HashSet<String> {
+        self.connected_components()
+            .into_iter()
+            .max_by_key(|component| component.len())
+            .unwrap_or_default()
+    }
+
+    fn harmonic_centrality(&self) -> Vec<(String, f64)> {
+        let mut centrality_scores = Vec::new();
+
+        for node in self.adjacency_list.keys() {
+            let distances = self.bfs_shortest_paths(node);
+            let harmonic_sum: f64 = distances
+                .values()
+                .map(|&d| if d > 0 { 1.0 / d as f64 } else { 0.0 })
+                .sum();
+
+            centrality_scores.push((node.clone(), harmonic_sum));
+        }
+
+        centrality_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        centrality_scores.into_iter().take(5).collect()
+    }
+
+      
+    
+}
+
+fn build_graph(flights: &[FlightData]) -> Graph {
+    let mut graph = Graph::new();
+
+    for flight in flights {
+        graph.add_edge(
+            &flight.us_airport,
+            &flight.foreign_airport,
+            flight.total_flights,
+        );
+    }
+
+    graph
+}
+
+fn top_busiest_airports(flights: &[FlightData]) -> Vec<(String, u32)> {
+    let mut airport_totals: HashMap<String, u32> = HashMap::new();
+
+    for flight in flights {
+        *airport_totals
+            .entry(flight.us_airport.clone())
+            .or_insert(0) += flight.total_flights;
+    }
+
+    let mut totals: Vec<_> = airport_totals.into_iter().collect();
+    totals.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by total flights in descending order
+
+    totals.into_iter().take(5).collect()
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let file_path = "International_Report_Departures.csv";
+    let flights = read_csv(file_path)?;
+
+    println!("Loaded {} records.", flights.len());
+
+    // Top 5 Busiest Airports
+    let busiest_airports = top_busiest_airports(&flights);
+    println!("\nTop 5 Busiest Airports:");
+    for (airport, total) in busiest_airports {
+        println!("{}: {} flights", airport, total);
+    }
+
+    // Build graph
+    let graph = build_graph(&flights);
+
+    // Graph statistics
+    let node_count = graph.adjacency_list.len();
+    let edge_count: usize = graph
+        .adjacency_list
+        .values()
+        .map(|neighbors| neighbors.len())
+        .sum::<usize>() / 2; // Divide by 2 for undirected edges
+    println!("\nGraph Statistics:");
+    println!("Nodes: {}", node_count);
+    println!("Edges: {}", edge_count);
+
+    // Connected components analysis
+    let components = graph.connected_components();
+    println!("\nNumber of connected components: {}", components.len());
+    for (i, component) in components.iter().enumerate() {
+        println!("Component {}: {} nodes", i + 1, component.len());
+    }
+
+    // Focus on the largest component
+    let largest_component = graph.largest_component();
+    println!("\nLargest component size: {}", largest_component.len());
+
+    // Harmonic centrality within the largest component
+    let harmonic_centralities = graph
+        .harmonic_centrality()
+        .into_iter()
+        .filter(|(node, _)| largest_component.contains(node))
+        .collect::<Vec<_>>();
+    println!("\nTop 5 Airports by Harmonic Centrality (Largest Component):");
+    for (airport, centrality) in harmonic_centralities {
+        println!("{}: {:.4}", airport, centrality);
+    }
+
 
     Ok(())
 }
@@ -177,67 +225,85 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_create_directed() {
-        let edges = vec![
-            (0, 1, 10),
-            (1, 2, 20),
-            (2, 0, 30),
-            (2, 3, 40),
-        ];
-        let graph = Graph::create_directed(4, &edges);
+    fn test_graph_add_edge() {
+        let mut graph = Graph::new();
+        graph.add_edge("A", "B", 10);
+        graph.add_edge("B", "C", 5);
 
-        assert_eq!(graph.n, 4);
-        assert_eq!(graph.outedges[0].len(), 1);
-        assert_eq!(graph.outedges[1].len(), 1);
-        assert_eq!(graph.outedges[2].len(), 2);
-        assert_eq!(graph.outedges[3].len(), 0);
+        assert_eq!(graph.adjacency_list.len(), 3); // Nodes: A, B, C
+        assert_eq!(graph.adjacency_list["A"].len(), 1); // A -> B
+        assert_eq!(graph.adjacency_list["B"].len(), 2); // B -> A, B -> C
+        assert_eq!(graph.adjacency_list["C"].len(), 1); // C -> B
     }
 
     #[test]
-    fn test_degree_centrality() {
-        let edges = vec![
-            (0, 1, 1),
-            (1, 2, 1),
-            (2, 0, 1),
-            (2, 3, 1),
-        ];
-        let graph = Graph::create_directed(4, &edges);
+    fn test_graph_bfs_shortest_paths() {
+        let mut graph = Graph::new();
+        graph.add_edge("A", "B", 1);
+        graph.add_edge("B", "C", 1);
+        graph.add_edge("A", "C", 2); // Edge weight ignored in BFS (unweighted graph)
 
-        let degree = graph.degree_centrality();
-        assert_eq!(degree[&0], 1);
-        assert_eq!(degree[&1], 1);
-        assert_eq!(degree[&2], 2);
-        assert_eq!(degree[&3], 0);
+        let distances = graph.bfs_shortest_paths("A");
+
+        assert_eq!(distances["A"], 0); // Distance to self
+        assert_eq!(distances["B"], 1); // Distance from A -> B
+        assert_eq!(distances["C"], 1); // Distance from A -> C (direct edge)
     }
 
     #[test]
-    fn test_closeness_centrality() {
-        let edges = vec![
-            (0, 1, 1),
-            (1, 2, 1),
-            (2, 0, 1),
-        ];
-        let graph = Graph::create_directed(3, &edges);
+    fn test_connected_components() {
+        let mut graph = Graph::new();
+        graph.add_edge("A", "B", 1);
+        graph.add_edge("B", "C", 1);
+        graph.add_edge("D", "E", 1); // Separate component
 
-        let closeness = graph.closeness_centrality();
-        assert!((closeness[&0] - 0.6667).abs() < 1e-4); // Node 0
-        assert!((closeness[&1] - 0.6667).abs() < 1e-4); // Node 1
-        assert_eq!(closeness[&2], 0.0); // Node 2
+        let components = graph.connected_components();
+
+        assert_eq!(components.len(), 2); // Two connected components
+        assert!(components.iter().any(|c| c.contains("A") && c.contains("B") && c.contains("C"))); // Component 1
+        assert!(components.iter().any(|c| c.contains("D") && c.contains("E"))); // Component 2
     }
 
     #[test]
-    fn test_shortest_paths() {
-        let edges = vec![
-            (0, 1, 1),
-            (1, 2, 1),
-            (0, 2, 2),
-        ];
-        let graph = Graph::create_directed(3, &edges);
+    fn test_largest_component() {
+        let mut graph = Graph::new();
+        graph.add_edge("A", "B", 1);
+        graph.add_edge("B", "C", 1);
+        graph.add_edge("D", "E", 1); // Separate smaller component
 
-        let paths = graph.shortest_paths(0);
-        assert_eq!(paths[&0], 0); 
-        assert_eq!(paths[&1], 1); 
-        assert_eq!(paths[&2], 2); 
+        let largest_component = graph.largest_component();
+
+        assert_eq!(largest_component.len(), 3); // Largest component size
+        assert!(largest_component.contains("A"));
+        assert!(largest_component.contains("B"));
+        assert!(largest_component.contains("C"));
+    }
+
+    #[test]
+    fn test_harmonic_centrality() {
+        let mut graph = Graph::new();
+        graph.add_edge("A", "B", 1);
+        graph.add_edge("B", "C", 1);
+        graph.add_edge("C", "D", 1);
+
+        let harmonic_centralities = graph.harmonic_centrality();
+
+        // Validate the top node by centrality
+        assert_eq!(harmonic_centralities[0].0, "B"); // Node B is central
+        assert!(harmonic_centralities[0].1 > 0.0); // Centrality score > 0
+    }
+
+    #[test]
+    fn test_busiest_routes() {
+        let mut graph = Graph::new();
+        graph.add_edge("A", "B", 100);
+        graph.add_edge("B", "C", 200);
+        graph.add_edge("C", "D", 50);
+
+        let busiest_routes = graph.busiest_routes();
+
+        // Check the top route
+        assert_eq!(busiest_routes[0].0, ("B".to_string(), "C".to_string())); // Top route
+        assert_eq!(busiest_routes[0].1, 200); // Flight count
     }
 }
-
