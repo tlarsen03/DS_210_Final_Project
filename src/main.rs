@@ -173,17 +173,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Loaded {} records.", flights.len());
 
-    // Top 5 Busiest Airports
     let busiest_airports = top_busiest_airports(&flights);
     println!("\nTop 5 Busiest Airports:");
     for (airport, total) in busiest_airports {
         println!("{}: {} flights", airport, total);
     }
 
-    // Build graph
     let graph = build_graph(&flights);
 
-    // Graph statistics
     let node_count = graph.adjacency_list.len();
     let edge_count: usize = graph
         .adjacency_list
@@ -194,18 +191,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Nodes: {}", node_count);
     println!("Edges: {}", edge_count);
 
-    // Connected components analysis
     let components = graph.connected_components();
     println!("\nNumber of connected components: {}", components.len());
     for (i, component) in components.iter().enumerate() {
         println!("Component {}: {} nodes", i + 1, component.len());
     }
 
-    // Focus on the largest component
     let largest_component = graph.largest_component();
     println!("\nLargest component size: {}", largest_component.len());
 
-    // Harmonic centrality within the largest component
     let harmonic_centralities = graph
         .harmonic_centrality()
         .into_iter()
